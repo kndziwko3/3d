@@ -1,20 +1,9 @@
 import * as THREE from 'three';
-import { NOISE, CRATERS, BUMP, LINES, RAY_SPHERE } from './glsl.js';
+import { NOISE, CRATERS, BUMP, LINES, RAY_SPHERE, SUN_DIR, OBJ_VERT } from './glsl.js';
 
 // All planets are tidally locked, so in a planet's own frame the star sits on +X
 // forever. The mesh is rotated each frame to keep that true (see system.js), which
 // lets every shader assume L = (1, 0, 0) in object space.
-
-const PLANET_VERT = /* glsl */ `
-varying vec3 vPos;
-varying vec3 vView;
-void main(){
-  vPos = position;
-  vec3 camObj = (inverse(modelMatrix) * vec4(cameraPosition, 1.0)).xyz;
-  vView = camObj - position;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}
-`;
 
 const PLANET_FRAG = /* glsl */ `
 varying vec3 vPos;
@@ -23,7 +12,7 @@ uniform float uTime;
 uniform float uOct;
 uniform vec3 uSunColor;
 uniform vec3 uAmbient;
-
+${SUN_DIR}
 ${NOISE}
 ${CRATERS}
 ${BUMP}
@@ -186,7 +175,7 @@ void main(){
   vec3 N = normalize(vPos);
   Surf s = surface(N);
   vec3 Nb = perturbNormal(N, vPos, s.height, s.bump);
-  vec3 L = vec3(1.0, 0.0, 0.0);
+  vec3 L = SUN_DIR;
   vec3 V = normalize(vView);
 
   float geo = dot(N, L);
@@ -209,18 +198,18 @@ void main(){
 }
 `;
 
-export const PLANET_TYPE = { b: 0, c: 1, d: 2, e: 3, f: 4, g: 5, h: 6 };
-
-export function createPlanetMaterial(id, shared) {
+/** One shader variant per world: PTYPE is the planet's index (b = 0 ... h = 6). */
+export function createPlanetMaterial(index, shared) {
   return new THREE.ShaderMaterial({
-    defines: { PTYPE: PLANET_TYPE[id] },
+    defines: { PTYPE: index },
     uniforms: {
+      uCamObj: { value: new THREE.Vector3() },
       uTime: shared.uTime,
       uOct: shared.uOct,
       uSunColor: shared.uSunColor,
       uAmbient: { value: new THREE.Color(0.55, 0.62, 1.0).multiplyScalar(0.085) },
     },
-    vertexShader: PLANET_VERT,
+    vertexShader: OBJ_VERT,
     fragmentShader: PLANET_FRAG,
   });
 }
@@ -237,6 +226,7 @@ uniform float uOct;
 uniform float uCover;
 uniform float uSubstellar;
 uniform vec3 uSunColor;
+${SUN_DIR}
 ${NOISE}
 
 vec2 cloudWarp(vec3 p){
@@ -255,12 +245,12 @@ float density(vec3 p, vec2 wp, float oct){
 
 void main(){
   vec3 N = normalize(vPos);
-  vec3 L = vec3(1.0, 0.0, 0.0);
+  vec3 L = SUN_DIR;
   vec2 wp = cloudWarp(N);
   float d = density(N, wp, uOct);
+  if (d < 0.004) discard;                       // most of the shell is empty: skip the shading sample
   vec3 Lt = normalize(L - N * dot(L, N) + 1e-4);
   float d2 = density(normalize(N + Lt * 0.02), wp, min(uOct, 4.0));
-  if (d < 0.004) discard;
   float shade = clamp(1.0 - (d2 - d) * 1.4, 0.4, 1.0);
   float ndl = dot(N, L);
   float lit = smoothstep(-0.08, 0.30, ndl);
@@ -273,13 +263,14 @@ void main(){
 export function createCloudMaterial(shared, { cover = 0.6, substellar = 1 } = {}) {
   return new THREE.ShaderMaterial({
     uniforms: {
+      uCamObj: { value: new THREE.Vector3() },
       uTime: shared.uTime,
       uOct: shared.uOct,
       uSunColor: shared.uSunColor,
       uCover: { value: cover },
       uSubstellar: { value: substellar },
     },
-    vertexShader: PLANET_VERT,
+    vertexShader: OBJ_VERT,
     fragmentShader: CLOUD_FRAG,
     transparent: true,
     depthWrite: false,
@@ -292,7 +283,6 @@ export function createCloudMaterial(shared, { cover = 0.6, substellar = 1 } = {}
 
 const ATMO_VERT = /* glsl */ `
 varying vec3 vObj;
-uniform vec3 uCamObj;
 void main(){
   vObj = position;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
@@ -312,6 +302,7 @@ uniform float uGain;
 uniform float uVeil;
 uniform float uPulse;
 uniform vec3 uPulseColor;
+${SUN_DIR}
 ${RAY_SPHERE}
 
 float phaseR(float mu){ return 0.0596831 * (1.0 + mu * mu); }
@@ -332,13 +323,12 @@ void main(){
   if (hitsPlanet) t1 = min(t1, tp.x);
   if (t1 <= t0) discard;
 
-  vec3 L = vec3(1.0, 0.0, 0.0);
+  vec3 L = SUN_DIR;
   float mu = dot(rd, L);
   const int N = 12;
   float dt = (t1 - t0) / float(N);
   float odView = 0.0;
-  vec3 sumR = vec3(0.0);
-  vec3 sumM = vec3(0.0);
+  vec3 sum = vec3(0.0);
   for (int i = 0; i < N; i++) {
     vec3 p = ro + rd * (t0 + (float(i) + 0.5) * dt);
     float h = max(length(p) - 1.0, 0.0);
@@ -359,10 +349,9 @@ void main(){
     }
     vec3 tau = (uBetaR + vec3(uBetaM * 1.1)) * (odView + odL);
     vec3 att = exp(-tau) * shadow;
-    sumR += rho * dt * att;
-    sumM += rho * dt * att;
+    sum += rho * dt * att;
   }
-  vec3 scatter = uSunColor * (sumR * uBetaR * phaseR(mu) + sumM * uBetaM * phaseM(mu, uG));
+  vec3 scatter = uSunColor * sum * (uBetaR * phaseR(mu) + uBetaM * phaseM(mu, uG));
   scatter *= uGain;
   float a = (1.0 - exp(-odView * (uBetaR.g + uBetaM) * 0.6)) * uVeil;
   // ring flash when this world 'transits' (sonification ping)

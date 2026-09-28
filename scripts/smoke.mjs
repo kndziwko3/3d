@@ -23,7 +23,7 @@ check('app ready', await page.evaluate(() => !!window.__app));
 // enter with sound
 await page.click('#enter-sound');
 await page.waitForTimeout(800);
-const audio = await page.evaluate(() => ({ enabled: window.__app.hooks.audio.enabled, state: window.__app.hooks.audio.ctx?.state, voices: window.__app.hooks.audio.voices.length }));
+const audio = await page.evaluate(() => ({ enabled: window.__app.sound.enabled, state: window.__app.sound.ctx?.state, voices: window.__app.sound.voices.length }));
 check('audio enabled', audio.enabled && audio.voices === 7, JSON.stringify(audio));
 check('body not loading', await page.evaluate(() => !document.body.classList.contains('is-loading')));
 // scroll flow
@@ -39,29 +39,53 @@ await page.click('#lang-seg button[data-lang="en"]');
 // explore
 await page.click('#btn-explore');
 await page.waitForTimeout(300);
-check('explore active', await page.evaluate(() => window.__app.hooks.explore.active && document.body.classList.contains('is-explore')));
+check('explore active', await page.evaluate(() => window.__app.explore.active && document.body.classList.contains('is-explore')));
 await page.evaluate(() => window.__app.step(6, 100));
 for (const k of [' ', ' ', ']', '[', '3', 't', 't', 'o', 'o', 'l', 'l', '0', 'Home']) { await page.keyboard.press(k); }
-check('focus keys', await page.evaluate(() => window.__app.hooks.explore.focus === -1));
+check('focus keys', await page.evaluate(() => window.__app.explore.focus === -1));
 await page.keyboard.press('4');
 await page.keyboard.press('s');
 await page.evaluate(() => window.__app.step(6, 100));
-check('sky mode', await page.evaluate(() => window.__app.hooks.explore.mode === 'sky' && document.body.classList.contains('is-sky')));
+check('sky mode', await page.evaluate(() => window.__app.explore.mode === 'sky' && document.body.classList.contains('is-sky')));
 await page.click('#ex-aim').catch(() => {});
 await page.click('[data-vantage="substellar"]');
 await page.click('[data-vantage="antistellar"]');
 await page.evaluate(() => window.__app.step(6, 100));
 await page.keyboard.press('Escape');
-check('back to orrery', await page.evaluate(() => window.__app.hooks.explore.mode === 'orrery' && window.__app.hooks.explore.active));
+check('back to orrery', await page.evaluate(() => window.__app.explore.mode === 'orrery' && window.__app.explore.active));
 await page.keyboard.press('Escape');
-check('back to story', await page.evaluate(() => !window.__app.hooks.explore.active && !document.body.classList.contains('is-explore')));
+check('back to story', await page.evaluate(() => !window.__app.explore.active && !document.body.classList.contains('is-explore')));
+// regressions found in review -------------------------------------------------------------
+// 1. Mercury's ring and its label belong to the story's last stop and must not leak into Explore
+await page.evaluate(() => { window.__app.at(10.9); window.__app.explore.open(-1); window.__app.step(4, 100); });
+check('no Mercury ring in Explore', await page.evaluate(() => window.__app.engine.system.mercuryOpacity === 0));
+check('scale label hidden in Explore', await page.evaluate(() => getComputedStyle(document.getElementById('scale-label')).visibility === 'hidden'));
+// 2. the followed world stays centred (was one frame behind at high speed)
+const lag = await page.evaluate(() => { const a = window.__app; a.explore.setFocus(0); a.explore.rateLog = 1.5; a.step(24, 100); return a.explore.target.distanceTo(a.engine.system.planets[0].pos); });
+check('camera target sits on the followed world', lag < 1e-6, String(lag));
+// 3. leaving the surface view fades back in
+await page.evaluate(() => { window.__app.explore.openSky('e'); window.__app.step(3, 100); window.__app.explore._leaveSky(true); window.__app.step(2, 100); });
+const fadeMid = await page.evaluate(() => window.__app.engine.fx.fade);
+await page.evaluate(() => window.__app.step(12, 100));
+const fadeEnd = await page.evaluate(() => window.__app.engine.fx.fade);
+check('fade ramps back in after the sky view', fadeMid > 0 && fadeMid < 1 && fadeEnd === 1, `${fadeMid} -> ${fadeEnd}`);
+await page.keyboard.press('Escape');
+// 4. the quality governor can recover after a hitch
+const gov = await page.evaluate(() => {
+  const e = window.__app.engine;
+  for (let i = 0; i < 400; i++) e.govern(45); // sustained slowness
+  const low = e.resScale + e.tierIndex * 10;
+  for (let i = 0; i < 3000; i++) e.govern(16.7); // then keeping up with a 60 Hz display
+  return { low, high: e.resScale + e.tierIndex * 10 };
+});
+check('governor recovers after slowness', gov.high > gov.low, JSON.stringify(gov));
 // resize
 await page.setViewportSize({ width: 420, height: 800 });
 await page.evaluate(() => window.__app.step(4, 100));
 check('no horizontal overflow @420', await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), await page.evaluate(() => `${document.documentElement.scrollWidth} > ${innerWidth}`));
 // sound toggle off
 await page.click('#btn-sound');
-check('sound toggled off', await page.evaluate(() => window.__app.hooks.audio.enabled === false));
+check('sound toggled off', await page.evaluate(() => window.__app.sound.enabled === false));
 console.log(ok.join('\n'));
 const failed = errors.filter((e) => /^(FAIL|console|pageerror)/.test(e));
 if (failed.length) { console.log('\nPROBLEMS:\n' + failed.join('\n')); process.exitCode = 1; } else console.log('\nALL CHECKS PASSED');

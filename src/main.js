@@ -1,16 +1,8 @@
 import './styles.css';
 import { Engine } from './gl/engine.js';
 import { COPY, detectLang } from './content.js';
-import {
-  STOPS,
-  buildSpacers,
-  renderPanels,
-  renderRail,
-  renderData,
-  renderOutro,
-  applyStaticText,
-  makeFormatter,
-} from './ui.js';
+import { MERCURY_ORBIT } from './data.js';
+import { STOPS, buildSpacers, renderPanels, renderRail, renderData, renderOutro, applyStaticText, makeFormatter } from './ui.js';
 import { Story } from './story.js';
 import { Sound } from './audio.js';
 import { Explore } from './explore.js';
@@ -19,44 +11,50 @@ const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
 const DEBUG = params.has('debug');
 
-const state = { lang: detectLang(), mode: 'loading', sound: false, started: false, static: false };
-const clock = { days: 0, rate: 0.012 };
-const hooks = { explore: null, audio: null };
+const state = { lang: detectLang(), started: false, static: false };
+const clock = { days: 0, rate: 0.012 }; // simulation days, and days per real second (story pace)
 
 try {
   history.scrollRestoration = 'manual';
-} catch {}
+} catch {
+  // some embedded contexts forbid it; the page then just restores scroll as usual
+}
+
+let engine = null;
+let story = null;
+let sound = null;
+let explore = null;
 
 function hasWebGL2() {
   try {
-    const c = document.createElement('canvas');
-    return !!c.getContext('webgl2');
+    return !!document.createElement('canvas').getContext('webgl2');
   } catch {
     return false;
   }
 }
 
 const toastEl = $('#toast');
-let toastT = 0;
-export function toast(msg, ms = 2400) {
+let toastTimer = 0;
+function toast(msg, ms = 2400) {
   toastEl.textContent = msg;
   toastEl.classList.add('on');
-  clearTimeout(toastT);
-  toastT = setTimeout(() => toastEl.classList.remove('on'), ms);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('on'), ms);
 }
 
 // -------------------------------------------------------------------------------------
 // DOM assembly
 // -------------------------------------------------------------------------------------
-const mounts = {
-  spacers: $('#story'),
-  panels: $('#panels'),
-  rail: $('#rail-list'),
-  data: $('#data'),
-  outro: $('#outro'),
-};
+const mounts = { spacers: $('#story'), panels: $('#panels'), rail: $('#rail-list'), data: $('#data'), outro: $('#outro') };
+const refs = { spacers: [], panels: [], rail: [] };
+const chips = new Map(); // chord chips in the chain panel, flashed on each transit
 
-let refs = { spacers: [], panels: [], rail: [] };
+function addStaticNote() {
+  const note = document.createElement('p');
+  note.className = 'static-note';
+  note.textContent = COPY[state.lang].a11y.noWebgl;
+  mounts.panels.prepend(note);
+}
 
 function renderAll() {
   applyStaticText(state.lang);
@@ -64,36 +62,18 @@ function renderAll() {
   refs.rail = renderRail(mounts.rail, state.lang);
   renderData(mounts.data, state.lang);
   renderOutro(mounts.outro, state.lang);
+  chips.clear();
+  mounts.panels.querySelectorAll('[data-chip]').forEach((el) => chips.set(el.dataset.chip, el));
   if (state.static) addStaticNote();
-  wireListenLabel();
+  sound?.syncUi();
 }
 
-function telemetryContext() {
+function hudContext() {
   const c = COPY[state.lang];
   return {
     fmt: makeFormatter(state.lang),
-    units: {
-      millionKm: c.ui.millionKm,
-      s: c.ui.seconds,
-      min: c.ui.minutes,
-      trueScale: c.ui.trueScale,
-      exaggerated: c.ui.exaggerated,
-    },
-    mercuryText: c.scale.mercury,
+    units: { millionKm: c.ui.millionKm, s: c.ui.seconds, min: c.ui.minutes, trueScale: c.ui.trueScale, exaggerated: c.ui.exaggerated },
   };
-}
-
-// -------------------------------------------------------------------------------------
-// Boot
-// -------------------------------------------------------------------------------------
-let engine = null;
-let story = null;
-
-function addStaticNote() {
-  const note = document.createElement('p');
-  note.className = 'static-note';
-  note.textContent = COPY[state.lang].a11y.noWebgl;
-  mounts.panels.prepend(note);
 }
 
 /** No WebGL2: the same content as a plain, readable page. CSS does the layout. */
@@ -104,62 +84,47 @@ function enableStaticMode() {
   addStaticNote();
 }
 
+// -------------------------------------------------------------------------------------
+// Boot
+// -------------------------------------------------------------------------------------
 async function boot() {
   refs.spacers = buildSpacers(mounts.spacers);
   renderAll();
   wireCommon();
 
-  if (!hasWebGL2()) {
-    enableStaticMode();
-    return;
-  }
+  if (!hasWebGL2()) return enableStaticMode();
 
   const fill = $('#loader-fill');
-  const setProgress = (v) => (fill.style.transform = `scaleX(${v})`);
-  setProgress(0.12);
+  const progress = (v) => (fill.style.transform = `scaleX(${v})`);
+  progress(0.12);
 
   try {
     const q = params.get('q'); // ?q=0|1|2 forces low, medium or high
     engine = new Engine($('#gl'), { tier: ['0', '1', '2'].includes(q) ? Number(q) : undefined });
   } catch (err) {
     console.warn('WebGL init failed', err);
-    enableStaticMode();
-    return;
+    return enableStaticMode();
   }
   engine.resize(innerWidth, innerHeight);
 
-  const fontsReady = Promise.race([document.fonts?.ready ?? Promise.resolve(), new Promise((r) => setTimeout(r, 2500))]);
-  await fontsReady;
-  setProgress(0.35);
+  await Promise.race([document.fonts?.ready ?? Promise.resolve(), new Promise((r) => setTimeout(r, 2500))]);
+  progress(0.35);
 
   const els = {
     veil: $('#veil'),
     progress: $('#progress'),
+    telemetryEl: $('#telemetry'),
     dist: $('#tele-dist'),
     delay: $('#tele-delay'),
     scale: $('#tele-scale'),
     scaleLabel: $('#scale-label'),
-    ...telemetryContext(),
+    mercuryOrbit: MERCURY_ORBIT,
+    ...hudContext(),
   };
   story = new Story({ engine, clock, spacers: refs.spacers, panels: refs.panels, railItems: refs.rail, els });
-
-  const sound = new Sound({
-    engine,
-    clock,
-    onPing: (i, vel) => {
-      if (hooks.explore?.active || story.focusIndex === i) engine.system.ping(i, Math.min(1, 0.4 + vel));
-      hooks.explore?.onPing(i);
-      const chip = document.querySelector(`[data-chip="${engine.system.planets[i].data.id}"]`);
-      if (chip) {
-        chip.classList.add('on');
-        setTimeout(() => chip.classList.remove('on'), 320);
-      }
-    },
-  });
-  const explore = new Explore({ engine, clock, story, sound, getLang: () => state.lang, toast, storyRate: clock.rate });
-  hooks.audio = sound;
-  hooks.explore = explore;
-  hooks.explore.toggle = explore.toggle.bind(explore);
+  sound = new Sound({ clock, onPing: handlePing });
+  explore = new Explore({ engine, clock, story, sound, getLang: () => state.lang, toast });
+  sound.syncUi();
 
   // Compile every program (planets, atmospheres, clouds, star, post) before the first visible frame.
   try {
@@ -168,69 +133,58 @@ async function boot() {
   } catch (e) {
     console.warn('compileAsync', e);
   }
-  setProgress(0.8);
-  engine.fx.fade = 0.75;
+  progress(0.8);
+  engine.setFade(0.75); // the scene shows through behind the title card
   document.body.classList.add('is-ready');
   frame(performance.now());
-  setProgress(1);
+  progress(1);
 
   $('#loader-status').textContent = COPY[state.lang].ui.ready;
   $('#loader-actions').hidden = false;
   $('#enter-sound').focus({ preventScroll: true });
-  state.mode = 'ready';
   window.__ready = true;
 
-  $('#scale-label').textContent = COPY[state.lang].scale.mercury;
   wireApp();
   requestAnimationFrame(loop);
   if (DEBUG) exposeDebug();
 }
 
+/** A world crossed the line of sight to Earth: pulse it on screen where that means something. */
+function handlePing(i, level) {
+  if (explore.active || story.focusIndex === i) engine.system.ping(i, Math.min(1, 0.4 + level));
+  explore.onPing(i);
+  const chip = chips.get(engine.system.planets[i].data.id);
+  if (chip) {
+    chip.classList.add('on');
+    setTimeout(() => chip.classList.remove('on'), 320);
+  }
+}
+
 // -------------------------------------------------------------------------------------
 // Main loop
 // -------------------------------------------------------------------------------------
-const exploreState = { paused: false, focus: -1 };
 let last = performance.now();
 let seconds = 0;
-let introStart = -1;
 
-function frame(now, doRender = true) {
+/** One frame at time `now` (ms). draw = false steps the simulation without touching the GPU. */
+function frame(now, draw = true) {
   const dt = Math.min(0.1, Math.max(0.0001, (now - last) / 1000));
   last = now;
   seconds += dt;
   clock.days += clock.rate * dt;
 
-  if (introStart >= 0) {
-    const t = (now - introStart) / 1000;
-    story.intro = Math.min(1, t / 3.4);
-    engine.fx.fade = Math.min(1, t / 1.6);
-  }
-
-  const m = hooks.explore?.active ? hooks.explore : null;
-  if (m) m.update(dt, seconds);
-  else story.update(dt, seconds);
-
-  if (doRender) engine.render(clock.days, seconds, dt);
-  else engine.system.update(clock.days, seconds, dt, engine.camera, engine.cssH);
-  if (hooks.audio?.enabled) {
-    let ex = null;
-    if (m) {
-      ex = exploreState;
-      ex.paused = !m.playing;
-      ex.focus = m.mode === 'sky' ? m.sky.i : m.focus >= 0 && m.focus < 7 ? m.focus : -1;
-    }
-    hooks.audio.update(dt, clock, story, ex);
-  }
+  engine.advance(clock.days, seconds, dt);
+  (explore.active ? explore : story).update(dt, seconds);
+  engine.render(seconds, dt, draw);
+  if (sound.enabled) sound.update(dt, clock, story, explore.active ? explore.audioState : null);
   return dt;
 }
 
 function loop(now) {
-  const t0 = performance.now();
-  if (!document.hidden) {
+  if (document.hidden) last = now;
+  else {
     const dt = frame(now);
-    if (introStart >= 0 && performance.now() - introStart > 2500) engine.govern(Math.min(80, dt * 1000));
-  } else {
-    last = now;
+    if (story.introT > 2.5) engine.govern(Math.min(80, dt * 1000)); // only once the intro has settled
   }
   requestAnimationFrame(loop);
 }
@@ -243,34 +197,24 @@ function setLang(lang) {
   state.lang = lang;
   try {
     localStorage.setItem('t1-lang', lang);
-  } catch {}
-  renderAll();
-  if (story) {
-    story.panels = refs.panels;
-    story.railItems = refs.rail;
-    Object.assign(story.els, telemetryContext());
-    if (story.els.scaleLabel) story.els.scaleLabel.textContent = COPY[state.lang].scale.mercury;
-    story.activeRail = -1;
+  } catch {
+    // storage can be blocked; the choice then lasts for this visit only
   }
-  hooks.explore?.relocalize?.(lang);
-  hooks.audio?.syncUi?.();
-}
-
-function wireListenLabel() {
-  hooks.audio?.syncUi?.();
+  renderAll();
+  story?.relocalize({ panels: refs.panels, railItems: refs.rail, els: hudContext() });
+  explore?.relocalize();
 }
 
 function enter(withSound) {
   if (state.started) return;
   state.started = true;
-  state.mode = 'story';
   document.body.classList.remove('is-loading');
   window.scrollTo({ top: 0, behavior: 'instant' });
-  introStart = performance.now();
   story.layout();
-  if (withSound) hooks.audio?.enable?.();
-  const hash = location.hash.slice(1);
-  const idx = STOPS.indexOf(hash);
+  story.startIntro();
+  engine.fadeTo(1, 1.6);
+  if (withSound) sound.enable();
+  const idx = STOPS.indexOf(location.hash.slice(1));
   if (idx > 0) setTimeout(() => story.goTo(idx, false), 60);
 }
 
@@ -287,73 +231,80 @@ function wireCommon() {
         e.preventDefault();
         try {
           history.replaceState(null, '', `#${id}`);
-        } catch {}
+        } catch {
+          // history can be locked down in embedded frames; scrolling still works
+        }
         story.goTo(idx);
       }
       return;
     }
     const b = e.target.closest('[data-act]');
-    if (!b) return;
+    if (!b || !explore) return;
     const act = b.dataset.act;
-    if (act === 'sky') hooks.explore?.openSky?.(b.dataset.planet);
-    if (act === 'explore') hooks.explore?.open?.();
-    if (act === 'listen') hooks.audio?.toggle?.(true);
+    if (act === 'sky') explore.openSky(b.dataset.planet);
+    else if (act === 'explore') explore.open();
+    else if (act === 'listen') sound.toggle(true);
   });
 
-  document.addEventListener('visibilitychange', () => hooks.audio?.visibility?.(document.hidden));
+  document.addEventListener('visibilitychange', () => sound?.visibility(document.hidden));
 }
 
 /** WebGL-only behaviour. */
 function wireApp() {
   $('#enter-sound').addEventListener('click', () => enter(true));
   $('#enter-silent').addEventListener('click', () => enter(false));
-
-  addEventListener('resize', () => {
-    engine.resize(innerWidth, innerHeight);
-    story.layout();
-  });
+  $('#btn-sound').addEventListener('click', () => sound.toggle());
+  $('#btn-explore').addEventListener('click', () => explore.toggle());
   document.fonts?.ready?.then(() => story.layout());
 
-  $('#btn-sound').addEventListener('click', () => hooks.audio?.toggle?.());
-  $('#btn-explore').addEventListener('click', () => hooks.explore?.toggle?.());
+  // Resize: one pass per frame. Phones fire it as the address bar slides during the scroll that drives
+  // this page; those small height-only changes keep the render buffer (re-allocating it would hitch).
+  let raf = 0;
+  let bufW = innerWidth;
+  let bufH = innerHeight;
+  const coarse = matchMedia('(pointer: coarse)');
+  addEventListener('resize', () => {
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => {
+      story.layout();
+      if (coarse.matches && innerWidth === bufW && Math.abs(innerHeight - bufH) < 0.15 * bufH) return;
+      bufW = innerWidth;
+      bufH = innerHeight;
+      engine.resize(bufW, bufH);
+    });
+  });
 }
 
 // -------------------------------------------------------------------------------------
-// Debug hooks for scripted screenshots
+// Debug hooks for scripted screenshots and tests (?debug)
 // -------------------------------------------------------------------------------------
 function exposeDebug() {
   window.__app = {
     engine,
     story,
+    explore,
+    sound,
     clock,
     state,
-    hooks,
     enter,
+    frame: () => frame(performance.now()),
     /** Jump to stop coordinate s (e.g. 3.35) and render synchronously. */
     at(s, o = {}) {
       if (!state.started) enter(false);
       story.layout();
       const k = Math.min(STOPS.length - 1, Math.floor(s));
-      const f = s - k;
-      const y = story.tops[k] + f * story.heights[k] - innerHeight * 0.5;
+      const y = story.tops[k] + (s - k) * story.heights[k] - innerHeight * 0.5;
       window.scrollTo({ top: Math.max(0, y), behavior: 'instant' });
-      story.s = story.coordinate();
-      story.sTarget = story.s;
-      story.intro = 1;
-      introStart = -1;
-      engine.fx.fade = 1;
+      story.jumpTo(story.coordinate());
+      engine.setFade(1);
       if (o.days !== undefined) clock.days = o.days;
       last = performance.now();
-      for (let i = 0; i < 3; i++) frame(performance.now() + i * 16);
+      for (let i = 0; i < 3; i++) frame(last + 16);
       return { s: story.s, scrollY: window.scrollY };
     },
-    frame: () => frame(performance.now()),
-    /** Advance n logic frames of `ms` each (no rendering except the last), then render. */
+    /** Advance n logic frames of `ms` each, drawing only the last. */
     step(n, ms = 100) {
-      for (let k = 0; k < n; k++) {
-        last = last + ms - 0;
-        frame(last + ms, k === n - 1);
-      }
+      for (let k = 0; k < n; k++) frame(last + ms, k === n - 1);
     },
   };
 }

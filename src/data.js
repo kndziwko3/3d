@@ -1,28 +1,36 @@
 // Physical data for TRAPPIST-1 from Agol et al. 2021 (PSJ 2, 1). Masses, radii, densities, gravities
 // and semi-major axes were checked against the paper's own tables; internal consistency is
 // g = M / R^2 (e.g. d: 0.388 / 0.788^2 = 0.625). Flux and Teq follow the NASA Exoplanet Archive listing.
-// Scene units: 1 unit = 1 Earth radius (6371 km). Everything is true scale
-// until a rig asks for exaggeration (see EXAG in story.js / orrery.js).
+// Scene units: 1 unit = 1 Earth radius (6371 km). Everything is true scale until a camera rig
+// asks for exaggeration (see EXAG below).
 
 export const AU_KM = 149597870.7;
 export const R_EARTH_KM = 6371.0084;
 export const R_SUN_KM = 695700;
-export const R_JUP_KM = 69911;
 export const MOON_ANGULAR_DEG = 0.52; // mean apparent diameter of the Moon from Earth
+export const SUN_ANGULAR_DEG = 0.533; // mean apparent diameter of the Sun from Earth
 
 export const STAR = {
-  name: 'TRAPPIST-1',
   radiusSun: 0.1192,
-  massSun: 0.0898,
   teff: 2325,
-  lumSun: 5.66e-4,
   distLy: 40.66,
-  ageGyr: 7.6,
-  rotDays: 3.3015,
   spectral: 'M8 V',
+  hue: '#ff7a45',
 };
 STAR.radius = (STAR.radiusSun * R_SUN_KM) / R_EARTH_KM; // ≈ 13.02 Earth radii
-STAR.radiusJup = (STAR.radiusSun * R_SUN_KM) / R_JUP_KM;
+
+/** Mercury's orbit around the Sun (0.387 AU) in scene units, for the scale comparison. */
+export const MERCURY_ORBIT = (0.3871 * AU_KM) / R_EARTH_KM;
+
+/**
+ * How much bigger than life the bodies are drawn. Planets and star are exaggerated so they can be seen;
+ * the HUD always states the factor. `scale` is the true-scale view.
+ */
+export const EXAG = {
+  story: { p: 5, s: 2.5 },
+  readable: { p: 20, s: 4 },
+  scale: { p: 1, s: 1 },
+};
 
 // hue = accent used in HUD and chapter styling. phase0 = illustrative start longitude (rad).
 const RAW = [
@@ -35,8 +43,16 @@ const RAW = [
   { id: 'h', mass: 0.326, a: 0.06189, period: 18.772866, radius: 0.755, flux: 0.144, teq: 171.7, g: 0.57, hue: '#c98a80', phase0: -0.7 },
 ];
 
-// Period ratio to the next planet outward, as reported (mean-motion resonance chain).
-const RESONANCE = ['8:5', '5:3', '3:2', '3:2', '4:3', '3:2'];
+/** Period ratios between neighbours, inner to outer: the mean-motion resonance chain. */
+export const RESONANCE_CHAIN = ['8:5', '5:3', '3:2', '3:2', '4:3', '3:2'];
+
+const RAD2DEG = 180 / Math.PI;
+
+/** Angular diameter (deg) of a sphere of radius r seen from distance d (exact for any d > r). */
+export const sphereAngularDeg = (r, d) => 2 * Math.asin(Math.min(1, r / d)) * RAD2DEG;
+
+/** Angular diameter (deg) of a distant body of radius r at distance d (small-angle tangent form). */
+export const angularDiameterDeg = (r, d) => 2 * Math.atan(r / d) * RAD2DEG;
 
 export const PLANETS = RAW.map((p, i) => {
   const orbit = (p.a * AU_KM) / R_EARTH_KM; // scene units
@@ -45,40 +61,29 @@ export const PLANETS = RAW.map((p, i) => {
     index: i,
     orbit,
     orbitKm: p.a * AU_KM,
-    density: p.mass / p.radius ** 3, // relative to Earth (5.51 g/cm³)
     escapeKms: Math.sqrt(p.mass / p.radius) * 11.186,
-    yearHours: p.period * 24,
-    resonanceOut: RESONANCE[i] ?? null,
-    // fraction of the star's disc as seen from the planet, degrees
-    starAngularDeg: (2 * Math.asin(STAR.radius / orbit) * 180) / Math.PI,
+    // the star's disc as seen from the planet, degrees
+    starAngularDeg: sphereAngularDeg(STAR.radius, orbit),
   };
 });
-
-export const byId = Object.fromEntries(PLANETS.map((p) => [p.id, p]));
-
-/** Angular diameter (deg) of body of radius r (Earth radii) at distance d. */
-export function angularDiameterDeg(r, d) {
-  return (2 * Math.atan(r / d) * 180) / Math.PI;
-}
-
-/**
- * Closest approach angular size of planet `b` as seen from planet `a`
- * (circular coplanar orbits: separation = |a_b - a_a|).
- */
-export function closestApproachDeg(from, to) {
-  const d = Math.abs(to.orbit - from.orbit);
-  return angularDiameterDeg(to.radius, d);
-}
 
 /**
  * Resonance chord. Orbital frequency ∝ 1/period; the near-exact period ratios
  * (8:5, 5:3, 3:2, 3:2, 4:3, 3:2) make the frequency ratios simple integers:
  * h:g:f:e:d:c:b = 2 : 3 : 4 : 6 : 9 : 15 : 24, i.e. 1 : 3/2 : 2 : 3 : 9/2 : 15/2 : 12.
- * Anchor h on 55 Hz (A1). Returns Hz per planet index.
+ * Anchor h on 55 Hz (A1).
  */
 export const CHORD_BASE_HZ = 55;
-export const CHORD_RATIOS = { h: 1, g: 1.5, f: 2, e: 3, d: 4.5, c: 7.5, b: 12 };
+const CHORD_RATIOS = { h: 1, g: 1.5, f: 2, e: 3, d: 4.5, c: 7.5, b: 12 };
 export const chordHz = (id) => CHORD_BASE_HZ * CHORD_RATIOS[id];
 
+const TAU = Math.PI * 2;
+
 /** Orbital angle (rad) of planet p at simulation time tDays. */
-export const orbitAngle = (p, tDays) => p.phase0 + (2 * Math.PI * tDays) / p.period;
+export const orbitAngle = (p, tDays) => p.phase0 + (TAU * tDays) / p.period;
+
+/** World position of planet p at tDays, written into `out` (anything with .set(x, y, z)). */
+export function orbitPosition(p, tDays, out) {
+  const th = orbitAngle(p, tDays);
+  return out.set(Math.cos(th) * p.orbit, 0, Math.sin(th) * p.orbit);
+}

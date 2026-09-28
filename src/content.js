@@ -3,7 +3,6 @@
 
 export const COPY = {
   en: {
-    lang: 'en',
     meta: {
       title: 'TRAPPIST-1 Atlas',
       description: 'A true-scale 3D atlas of TRAPPIST-1, seven Earth-sized worlds around one small red star. Every planet is procedural, and the soundtrack is the system’s real orbital resonance.',
@@ -17,18 +16,13 @@ export const COPY = {
       skip: 'Skip to the data',
       chapter: 'Chapter',
       explore: 'Explore',
-      exploreTitle: 'Leave the story and fly the system yourself',
       backToStory: 'Back to story',
       sound: 'Sound',
-      soundOn: 'Sound on',
-      soundOff: 'Sound off',
-      language: 'Language',
       distStar: 'Distance to star',
       lightDelay: 'Starlight takes',
       sizes: 'Sizes',
       trueScale: 'true scale',
       exaggerated: '×{n} exaggerated',
-      quality: 'Quality',
       artist: 'Artist’s impression. No image of these surfaces exists.',
       known: 'What we know',
       unknown: 'What we don’t',
@@ -42,7 +36,6 @@ export const COPY = {
       days: 'd',
       hours: 'h',
       earthRadii: '× Earth',
-      earthG: 'g',
       earthLight: '× Earth’s',
     },
     stats: {
@@ -53,7 +46,6 @@ export const COPY = {
       temp: 'Temperature',
       light: 'Starlight',
       gravity: 'Gravity',
-      tempNote: 'equilibrium, no atmosphere',
       sky: 'Star in sky',
       skyUnit: '× the Sun’s width',
       escape: 'escape {v} km/s',
@@ -138,7 +130,6 @@ export const COPY = {
       lede: 'Neighbouring planets have orbital periods in near whole-number ratios: 8:5, 5:3, 3:2, 3:2, 4:3, 3:2. This resonant chain is thought to be a fossil of the planets drifting inward together, gently, while the system was young.',
       sound: 'Turn the periods into pitch and the chain becomes a chord. Frequency ∝ 1 / period, shifted by a fixed factor into hearing range: 55, 82.5, 110, 165, 247.5, 412.5 and 660 Hz.',
       listen: 'Listen',
-      listening: 'Playing the chord',
       standOn: 'Stand on e',
     },
     scale: {
@@ -212,7 +203,6 @@ export const COPY = {
   },
 
   pl: {
-    lang: 'pl',
     meta: {
       title: 'Atlas TRAPPIST-1',
       description: 'Atlas 3D układu TRAPPIST-1 w prawdziwej skali: siedem światów wielkości Ziemi wokół jednej małej, czerwonej gwiazdy. Każda planeta jest proceduralna, a ścieżką dźwiękową jest prawdziwy rezonans orbit.',
@@ -226,18 +216,13 @@ export const COPY = {
       skip: 'Przejdź do danych',
       chapter: 'Rozdział',
       explore: 'Eksploruj',
-      exploreTitle: 'Opuść opowieść i sam steruj układem',
       backToStory: 'Wróć do opowieści',
       sound: 'Dźwięk',
-      soundOn: 'Dźwięk włączony',
-      soundOff: 'Dźwięk wyłączony',
-      language: 'Język',
       distStar: 'Odległość od gwiazdy',
       lightDelay: 'Światło gwiazdy leci',
       sizes: 'Rozmiary',
       trueScale: 'prawdziwa skala',
       exaggerated: 'powiększone ×{n}',
-      quality: 'Jakość',
       artist: 'Wizja artystyczna. Nikt nie widział tych powierzchni.',
       known: 'Co wiemy',
       unknown: 'Czego nie wiemy',
@@ -251,7 +236,6 @@ export const COPY = {
       days: 'd',
       hours: 'h',
       earthRadii: '× Ziemia',
-      earthG: 'g',
       earthLight: '× Ziemi',
     },
     stats: {
@@ -262,7 +246,6 @@ export const COPY = {
       temp: 'Temperatura',
       light: 'Światło gwiazdy',
       gravity: 'Grawitacja',
-      tempNote: 'równowagowa, bez atmosfery',
       sky: 'Gwiazda na niebie',
       skyUnit: '× szerokość Słońca',
       escape: 'ucieczki {v} km/s',
@@ -347,7 +330,6 @@ export const COPY = {
       lede: 'Okresy obiegu sąsiednich planet mają niemal całkowite stosunki: 8:5, 5:3, 3:2, 3:2, 4:3, 3:2. Uważa się, że ten łańcuch rezonansowy to skamielina po tym, jak planety razem i łagodnie dryfowały do środka, gdy układ był młody.',
       sound: 'Zamień okresy na wysokość dźwięku, a łańcuch stanie się akordem. Częstotliwość ∝ 1 / okres, przesunięta o stały czynnik w zakres słyszalny: 55, 82,5, 110, 165, 247,5, 412,5 i 660 Hz.',
       listen: 'Posłuchaj',
-      listening: 'Gra akord',
       standOn: 'Stań na e',
     },
     scale: {

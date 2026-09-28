@@ -1,37 +1,8 @@
 import * as THREE from 'three';
-import { NOISE } from './glsl.js';
-
-const ARC_VERT = /* glsl */ `
-varying vec2 vUv;
-void main(){
-  vUv = uv;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}
-`;
-const ARC_FRAG = /* glsl */ `
-varying vec2 vUv;
-uniform float uIntensity;
-uniform float uTime;
-void main(){
-  float flick = 0.82 + 0.18 * sin(vUv.x * 40.0 + uTime * 6.0);
-  vec3 col = mix(vec3(1.0, 0.24, 0.04), vec3(1.0, 0.52, 0.20), 0.5 + 0.5 * sin(vUv.y * 6.2831));
-  gl_FragColor = vec4(col * uIntensity * flick, 1.0);
-}
-`;
+import { NOISE, OBJ_VERT } from './glsl.js';
 
 // TRAPPIST-1: an M8 dwarf, fully convective, deep orange-red. The surface is a
 // convection-cell mosaic with strong limb darkening and a few cool starspots.
-
-const STAR_VERT = /* glsl */ `
-varying vec3 vPos;
-varying vec3 vView;
-void main(){
-  vPos = position;
-  vec3 camObj = (inverse(modelMatrix) * vec4(cameraPosition, 1.0)).xyz;
-  vView = camObj - position;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}
-`;
 
 const STAR_FRAG = /* glsl */ `
 varying vec3 vPos;
@@ -91,34 +62,68 @@ void main(){
   vec2 p = vUv * uSize;
   float x = length(p);
   if (x < 0.98) discard;
-  float ang = atan(p.y, p.x);
-  float streak = snoise(vec3(cos(ang) * 1.6, sin(ang) * 1.6, uTime * 0.04 + x * 0.12));
-  float streak2 = snoise(vec3(cos(ang) * 4.0, sin(ang) * 4.0, uTime * 0.06 - x * 0.25));
-  float rays = 0.72 + 0.28 * streak + 0.12 * streak2;
   float core = exp(-(x - 1.0) * 3.4);
   float halo = 0.10 / (x * x * 0.35 + 0.45);
   float fall = smoothstep(uSize, uSize * 0.35, x);
-  float I = (core * 0.9 + halo) * rays * fall;
-  vec3 col = mix(vec3(0.95, 0.16, 0.035), vec3(1.0, 0.40, 0.12), core) * I * uIntensity;
+  float base = (core * 0.9 + halo) * fall;
+  if (base < 0.0015) discard;                     // the quad is large: its far corners add nothing
+  vec2 dir = p / x;
+  float streak = snoise(vec3(dir * 1.6, uTime * 0.04 + x * 0.12));
+  float streak2 = snoise(vec3(dir * 4.0, uTime * 0.06 - x * 0.25));
+  float rays = 0.72 + 0.28 * streak + 0.12 * streak2;
+  vec3 col = mix(vec3(0.95, 0.16, 0.035), vec3(1.0, 0.40, 0.12), core) * base * rays * uIntensity;
   gl_FragColor = vec4(col, 1.0);
 }
 `;
 
-export function createStar(shared, radius) {
+const ARC_VERT = /* glsl */ `
+varying vec2 vUv;
+void main(){
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`;
+const ARC_FRAG = /* glsl */ `
+varying vec2 vUv;
+uniform float uIntensity;
+uniform float uTime;
+void main(){
+  float flick = 0.82 + 0.18 * sin(vUv.x * 40.0 + uTime * 6.0);
+  vec3 col = mix(vec3(1.0, 0.24, 0.04), vec3(1.0, 0.52, 0.20), 0.5 + 0.5 * sin(vUv.y * 6.2831));
+  gl_FragColor = vec4(col * uIntensity * flick, 1.0);
+}
+`;
+
+const CORONA_BASE = 0.85;
+const FLARE_SECONDS = 8;
+
+const flareEnvelope = (t) => (t > FLARE_SECONDS ? 0 : t < 0.5 ? t / 0.5 : Math.exp(-(t - 0.5) / 2.4));
+
+export function createStar(shared) {
   const group = new THREE.Group();
 
-  const geo = new THREE.SphereGeometry(1, 128, 96);
-  const mat = new THREE.ShaderMaterial({
-    uniforms: { uTime: shared.uTime, uOct: shared.uOct, uIntensity: { value: 1.8 }, uFlare: { value: 0 }, uFlareDir: { value: new THREE.Vector3(0, 0, 1) } },
-    vertexShader: STAR_VERT,
-    fragmentShader: STAR_FRAG,
-  });
-  const body = new THREE.Mesh(geo, mat);
-  body.frustumCulled = false;
+  const sphere = new THREE.SphereGeometry(1, 128, 96);
+  sphere.deleteAttribute('normal');
+  sphere.deleteAttribute('uv');
+  const body = new THREE.Mesh(
+    sphere,
+    new THREE.ShaderMaterial({
+      uniforms: {
+        uCamObj: { value: new THREE.Vector3() },
+        uTime: shared.uTime,
+        uOct: shared.uOct,
+        uIntensity: { value: 1.8 },
+        uFlare: { value: 0 },
+        uFlareDir: { value: new THREE.Vector3(0, 0, 1) },
+      },
+      vertexShader: OBJ_VERT,
+      fragmentShader: STAR_FRAG,
+    }),
+  );
   group.add(body);
 
   const coronaMat = new THREE.ShaderMaterial({
-    uniforms: { uTime: shared.uTime, uSize: { value: 12 }, uIntensity: { value: 0.85 } },
+    uniforms: { uTime: shared.uTime, uSize: { value: 12 }, uIntensity: { value: CORONA_BASE } },
     vertexShader: CORONA_VERT,
     fragmentShader: CORONA_FRAG,
     transparent: true,
@@ -126,7 +131,7 @@ export function createStar(shared, radius) {
     blending: THREE.AdditiveBlending,
   });
   const corona = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), coronaMat);
-  corona.frustumCulled = false;
+  corona.frustumCulled = false; // billboarded and enormous: cheaper to always draw
   corona.renderOrder = 1;
   group.add(corona);
 
@@ -141,82 +146,85 @@ export function createStar(shared, radius) {
   });
   const arcGeo = new THREE.TorusGeometry(1, 0.05, 10, 72, Math.PI);
   const arcs = [new THREE.Mesh(arcGeo, arcMat), new THREE.Mesh(arcGeo, arcMat)];
-  arcs.forEach((a) => {
+  for (const a of arcs) {
     a.frustumCulled = false;
     a.visible = false;
     a.renderOrder = 2;
     a.matrixAutoUpdate = false;
     group.add(a);
-  });
-  const flare = { t: 99, phi: 0, dir: new THREE.Vector3(0, 0, 1) };
-  const _r = new THREE.Vector3();
-  const _u = new THREE.Vector3();
-  const _f = new THREE.Vector3();
-  const _x = new THREE.Vector3();
-  const _y = new THREE.Vector3();
-  const _m = new THREE.Matrix4();
-  const _look = new THREE.Vector3();
+  }
 
-  const star = {
+  const flare = { t: Infinity, phi: 0 };
+  const uFlareDir = body.material.uniforms.uFlareDir.value;
+  const right = new THREE.Vector3();
+  const upV = new THREE.Vector3();
+  const toCam = new THREE.Vector3();
+  const tangent = new THREE.Vector3();
+  const outward = new THREE.Vector3();
+  const foot = new THREE.Vector3();
+  const bx = new THREE.Vector3();
+  const by = new THREE.Vector3();
+  const bz = new THREE.Vector3();
+  const m = new THREE.Matrix4();
+
+  const hideArcs = () => {
+    for (const a of arcs) a.visible = false;
+  };
+
+  return {
     group,
-    body,
-    corona,
     setRadius(r) {
       body.scale.setScalar(r);
       corona.scale.setScalar(r * coronaMat.uniforms.uSize.value);
     },
-    /** Billboard the corona towards the camera. */
-    face(camera) {
-      corona.quaternion.copy(camera.quaternion);
+    /** Camera position in the star's frame (the star sits at the origin, unrotated). */
+    setCamera(camera) {
+      body.material.uniforms.uCamObj.value.copy(camera.position).divideScalar(body.scale.x);
+      corona.quaternion.copy(camera.quaternion); // billboard
     },
-    /** Start a flare on a random limb point. */
+    /** Start a flare on a random point of the limb as the camera sees it. */
     triggerFlare(camera) {
       flare.t = 0;
       flare.phi = Math.random() * Math.PI * 2;
-      // pick the surface point on the limb as the camera sees it, so the loops read clearly
-      _r.setFromMatrixColumn(camera.matrixWorld, 0);
-      _u.setFromMatrixColumn(camera.matrixWorld, 1);
-      flare.dir.copy(_r).multiplyScalar(Math.cos(flare.phi)).addScaledVector(_u, Math.sin(flare.phi)).normalize();
-      body.material.uniforms.uFlareDir.value.copy(flare.dir).transformDirection(body.matrixWorld.clone().invert());
-    },
-    get flareEnvelope() {
-      return flare.t > 8 ? 0 : (flare.t < 0.5 ? flare.t / 0.5 : Math.exp(-(flare.t - 0.5) / 2.4));
+      right.setFromMatrixColumn(camera.matrixWorld, 0);
+      upV.setFromMatrixColumn(camera.matrixWorld, 1);
+      uFlareDir.copy(right).multiplyScalar(Math.cos(flare.phi)).addScaledVector(upV, Math.sin(flare.phi)).normalize();
     },
     updateFlare(dt, camera) {
-      if (flare.t > 8) {
-        body.material.uniforms.uFlare.value = 0;
-        arcs.forEach((a) => (a.visible = false));
-        coronaMat.uniforms.uIntensity.value = 0.85;
+      if (flare.t > FLARE_SECONDS) {
+        if (body.material.uniforms.uFlare.value !== 0) {
+          body.material.uniforms.uFlare.value = 0;
+          coronaMat.uniforms.uIntensity.value = CORONA_BASE;
+          hideArcs();
+        }
         return;
       }
       flare.t += dt;
-      const env = star.flareEnvelope;
+      const env = flareEnvelope(flare.t);
       body.material.uniforms.uFlare.value = env;
-      coronaMat.uniforms.uIntensity.value = 0.85 * (1 + env * 0.7);
+      coronaMat.uniforms.uIntensity.value = CORONA_BASE * (1 + env * 0.7);
       arcMat.uniforms.uIntensity.value = env * 0.85;
+      if (env <= 0.02) return hideArcs();
+
       const Rs = body.scale.x;
-      _r.setFromMatrixColumn(camera.matrixWorld, 0);
-      _u.setFromMatrixColumn(camera.matrixWorld, 1);
-      _f.setFromMatrixColumn(camera.matrixWorld, 2); // towards the camera
-      const dirL = _y.copy(_r).multiplyScalar(Math.cos(flare.phi)).addScaledVector(_u, Math.sin(flare.phi)).normalize();
-      _x.copy(dirL).cross(_f).normalize().negate(); // tangent along the limb
+      right.setFromMatrixColumn(camera.matrixWorld, 0);
+      upV.setFromMatrixColumn(camera.matrixWorld, 1);
+      toCam.setFromMatrixColumn(camera.matrixWorld, 2); // z axis: towards the camera
+      outward.copy(right).multiplyScalar(Math.cos(flare.phi)).addScaledVector(upV, Math.sin(flare.phi)).normalize();
+      tangent.copy(outward).cross(toCam).normalize().negate();
       // the silhouette as the camera sees it: a circle slightly nearer than the star's centre
-      const D = Math.max(camera.position.length(), Rs * 1.001);
-      const ratio = Rs / D;
-      const rr = Rs * Math.sqrt(Math.max(1 - ratio * ratio, 0));
-      const back = Rs * ratio; // Rs^2 / D
-      const foot = _look.copy(camera.position).normalize().multiplyScalar(back).addScaledVector(dirL, rr);
+      const ratio = Rs / Math.max(camera.position.length(), Rs * 1.001);
+      const silhouette = Rs * Math.sqrt(Math.max(1 - ratio * ratio, 0));
+      foot.copy(camera.position).normalize().multiplyScalar(Rs * ratio).addScaledVector(outward, silhouette);
       const grow = 1 - Math.pow(1 - Math.min(1, flare.t / 1.6), 2);
-      arcs.forEach((a, k) => {
+      for (let k = 0; k < arcs.length; k++) {
         const rad = Rs * (0.26 - k * 0.09) * (0.25 + 0.75 * grow);
         const ht = rad * (1.5 - k * 0.2);
-        _m.makeBasis(_x.clone().multiplyScalar(rad), dirL.clone().multiplyScalar(ht), _f.clone().multiplyScalar(rad));
-        _m.setPosition(foot.clone().addScaledVector(dirL, -rad * 0.12));
-        a.matrix.copy(_m);
-        a.visible = env > 0.02;
-      });
+        m.makeBasis(bx.copy(tangent).multiplyScalar(rad), by.copy(outward).multiplyScalar(ht), bz.copy(toCam).multiplyScalar(rad));
+        m.setPosition(foot.x - outward.x * rad * 0.12, foot.y - outward.y * rad * 0.12, foot.z - outward.z * rad * 0.12);
+        arcs[k].matrix.copy(m);
+        arcs[k].visible = true;
+      }
     },
   };
-  star.setRadius(radius);
-  return star;
 }

@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { HASH } from './glsl.js';
+import { fullscreenTriangle } from './fullscreen.js';
 
 // Post-processing: MSAA half-float scene target -> dual-filter bloom (13-tap down,
 // tent up, Karis average on the first level) -> one composite pass that adds the
@@ -7,7 +9,7 @@ import * as THREE from 'three';
 const FS_VERT = /* glsl */ `
 varying vec2 vUv;
 void main(){
-  vUv = uv;
+  vUv = position.xy * 0.5 + 0.5;
   gl_Position = vec4(position.xy, 0.0, 1.0);
 }
 `;
@@ -55,13 +57,12 @@ const UP_FRAG = /* glsl */ `
 varying vec2 vUv;
 uniform sampler2D tSrc;
 uniform vec2 uTexel;
-uniform float uWeight;
 vec3 s(vec2 o){ return texture2D(tSrc, vUv + o * uTexel).rgb; }
 void main(){
   vec3 r = s(vec2(-1.0,  1.0)) + s(vec2(0.0,  1.0)) * 2.0 + s(vec2(1.0,  1.0))
          + s(vec2(-1.0,  0.0)) * 2.0 + s(vec2(0.0,  0.0)) * 4.0 + s(vec2(1.0,  0.0)) * 2.0
          + s(vec2(-1.0, -1.0)) + s(vec2(0.0, -1.0)) * 2.0 + s(vec2(1.0, -1.0));
-  gl_FragColor = vec4(r * (1.0 / 16.0) * uWeight, 1.0);
+  gl_FragColor = vec4(r * (1.0 / 16.0), 1.0);
 }
 `;
 
@@ -81,12 +82,8 @@ uniform float uVignette;
 uniform float uFade;
 uniform float uSat;
 uniform float uContrast;
+${HASH}
 
-float hash12(vec2 p){
-  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract((p3.x + p3.y) * p3.z);
-}
 
 // Khronos PBR Neutral tone mapping: keeps hue and saturation of hot reds.
 vec3 neutralTonemap(vec3 color){
@@ -120,11 +117,15 @@ void main(){
   vec2 c = uv - 0.5;
   float r2 = dot(c, c);
 
-  vec2 ab = c * uAberration * (0.4 + r2 * 3.0);
   vec3 col;
-  col.r = texture2D(tScene, uv + ab).r;
-  col.g = texture2D(tScene, uv).g;
-  col.b = texture2D(tScene, uv - ab).b;
+  if (uAberration > 0.0) {
+    vec2 ab = c * uAberration * (0.4 + r2 * 3.0);
+    col.r = texture2D(tScene, uv + ab).r;
+    col.g = texture2D(tScene, uv).g;
+    col.b = texture2D(tScene, uv - ab).b;
+  } else {
+    col = texture2D(tScene, uv).rgb;
+  }
 
   vec3 bloom = texture2D(tBloom, uv).rgb;
   col += bloom * uBloom;
@@ -169,13 +170,6 @@ void main(){
 }
 `;
 
-function makeFullscreenTriangle() {
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
-  g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 2, 0, 0, 2], 2));
-  return g;
-}
-
 export class Post {
   constructor(renderer) {
     this.renderer = renderer;
@@ -188,7 +182,7 @@ export class Post {
     this._dirty = true;
 
     this.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    const tri = makeFullscreenTriangle();
+    const tri = fullscreenTriangle();
     const mk = (mat) => {
       const mesh = new THREE.Mesh(tri, mat);
       mesh.frustumCulled = false;
@@ -214,7 +208,7 @@ export class Post {
     );
     this.up = mk(
       new THREE.ShaderMaterial({
-        uniforms: { tSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uWeight: { value: 1 } },
+        uniforms: { tSrc: { value: null }, uTexel: { value: new THREE.Vector2() } },
         vertexShader: FS_VERT,
         fragmentShader: UP_FRAG,
         depthTest: false,
@@ -233,14 +227,14 @@ export class Post {
           tScene: { value: null },
           tBloom: { value: null },
           uRes: { value: new THREE.Vector2(1, 1) },
-          uBloom: { value: 0.9 },
+          uBloom: { value: 0 },
           uExposure: { value: 1 },
           uTime: { value: 0 },
           uStarUV: { value: new THREE.Vector2(0.5, 0.5) },
           uFlare: { value: 0 },
-          uAberration: { value: 0.0015 },
-          uGrain: { value: 0.028 },
-          uVignette: { value: 0.5 },
+          uAberration: { value: 0 },
+          uGrain: { value: 0 },
+          uVignette: { value: 0 },
           uFade: { value: 1 },
           uSat: { value: 1.06 },
           uContrast: { value: 0.28 },
@@ -309,23 +303,24 @@ export class Post {
     r.render(pass.scene, this.cam);
   }
 
-  /** fx: exposure, bloom, threshold, flare, starUV, aberration, grain, vignette, fade, time */
+  /**
+   * fx (owned by Engine, every key present): exposure, bloom, threshold, flare, starUV,
+   * aberration, grain, vignette, fade, time.
+   */
   render(scene, camera, fx) {
     if (this._dirty) {
       this._build();
       this._dirty = false;
     }
     const r = this.renderer;
-    const prevAuto = r.autoClear;
-    r.autoClear = false;
 
     r.setRenderTarget(this.sceneRT);
     r.clear();
     r.render(scene, camera);
 
-    // bloom chain
+    // bloom chain: 13-tap downsample, then tent upsample added back into each level
     const d = this.down;
-    d.mat.uniforms.uThreshold.value = fx.threshold ?? 0.9;
+    d.mat.uniforms.uThreshold.value = fx.threshold;
     let src = this.sceneRT.texture;
     let sw = this.width;
     let sh = this.height;
@@ -344,29 +339,21 @@ export class Post {
       const from = this.mips[i + 1];
       u.mat.uniforms.tSrc.value = from.rt.texture;
       u.mat.uniforms.uTexel.value.set(1 / from.w, 1 / from.h);
-      u.mat.uniforms.uWeight.value = 1;
       this._draw(u, this.mips[i].rt, false);
     }
 
     const cu = this.comp.mat.uniforms;
     cu.tScene.value = this.sceneRT.texture;
     cu.tBloom.value = this.mips[0].rt.texture;
-    cu.uBloom.value = fx.bloom ?? 0.9;
-    cu.uExposure.value = fx.exposure ?? 1;
-    cu.uTime.value = fx.time ?? 0;
-    cu.uFlare.value = fx.flare ?? 0;
-    if (fx.starUV) cu.uStarUV.value.copy(fx.starUV);
-    cu.uAberration.value = fx.aberration ?? 0.0015;
-    cu.uGrain.value = fx.grain ?? 0.028;
-    cu.uVignette.value = fx.vignette ?? 0.5;
-    cu.uFade.value = fx.fade ?? 1;
+    cu.uBloom.value = fx.bloom;
+    cu.uExposure.value = fx.exposure;
+    cu.uTime.value = fx.time;
+    cu.uFlare.value = fx.flare * fx.starVisibility;
+    cu.uStarUV.value.copy(fx.starUV);
+    cu.uAberration.value = fx.aberration;
+    cu.uGrain.value = fx.grain;
+    cu.uVignette.value = fx.vignette;
+    cu.uFade.value = fx.fade;
     this._draw(this.comp, null, true);
-
-    r.autoClear = prevAuto;
-  }
-
-  dispose() {
-    this.sceneRT?.dispose();
-    for (const m of this.mips) m.rt.dispose();
   }
 }

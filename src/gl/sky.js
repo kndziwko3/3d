@@ -1,8 +1,12 @@
 import * as THREE from 'three';
 import { NOISE } from './glsl.js';
 
-// Background: a star field (Points), a faint nebular dome, and a dust volume that
-// wraps around the camera to give parallax when it moves.
+// Background: a star field (Points), a faint nebular dome baked once into a cube map, and a dust
+// volume that wraps around the camera to give parallax when it moves.
+
+// Tilted band, like the galactic plane seen from outside our own neighbourhood. Stars and nebula share it.
+const GAL_AXIS = new THREE.Vector3(0.35, 0.82, -0.45).normalize();
+const glslVec3 = (v) => `vec3(${v.x.toFixed(4)}, ${v.y.toFixed(4)}, ${v.z.toFixed(4)})`;
 
 function mulberry32(seed) {
   return function () {
@@ -20,12 +24,10 @@ attribute vec3 aColor;
 attribute float aPhase;
 uniform float uPx;
 uniform float uTime;
-uniform float uTwinkle;
 varying vec3 vColor;
 void main(){
-  vColor = aColor * (1.0 + uTwinkle * 0.35 * sin(uTime * (1.5 + aPhase) + aPhase * 40.0));
-  vec4 mv = modelViewMatrix * vec4(position, 1.0);
-  gl_Position = projectionMatrix * mv;
+  vColor = aColor * (1.0 + 0.35 * sin(uTime * (1.5 + aPhase) + aPhase * 40.0));
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   gl_PointSize = aSize * uPx;
 }
 `;
@@ -35,32 +37,21 @@ void main(){
   vec2 c = gl_PointCoord * 2.0 - 1.0;
   float d = dot(c, c);
   if (d > 1.0) discard;
-  float a = exp(-d * 4.0);
-  gl_FragColor = vec4(vColor * a, 1.0);
+  gl_FragColor = vec4(vColor * exp(-d * 4.0), 1.0);
 }
 `;
 
-const NEBULA_VERT = /* glsl */ `
+// Nebula: computed once per direction into a cube map (see bakeNebula), then just sampled.
+const NEBULA_BAKE_FRAG = /* glsl */ `
 varying vec3 vDir;
-void main(){
-  vDir = normalize(position);
-  vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  gl_Position = p.xyww; // pinned to the far plane
-}
-`;
-const NEBULA_FRAG = /* glsl */ `
-varying vec3 vDir;
-uniform float uTime;
-uniform float uOct;
 uniform float uStrength;
 ${NOISE}
 void main(){
   vec3 d = normalize(vDir);
-  // A tilted band, like the galactic plane seen from outside our own neighbourhood.
-  vec3 axis = normalize(vec3(0.35, 0.82, -0.45));
+  vec3 axis = ${glslVec3(GAL_AXIS)};
   float lat = dot(d, axis);
   float band = exp(-lat * lat * 9.0);
-  float n = fbm(d * 2.2 + 3.0, max(uOct - 1.0, 3.0)) * 0.5 + 0.5;
+  float n = fbm(d * 2.2 + 3.0, 5.0) * 0.5 + 0.5;
   float dust = fbm(d * 5.0 + 11.0, 3.0) * 0.5 + 0.5;
   float cloud = smoothstep(0.28, 0.95, n) * (0.25 + 0.75 * band);
   float lanes = smoothstep(0.55, 0.8, dust) * band;
@@ -71,8 +62,28 @@ void main(){
   col += ember * cloud * 0.9;
   col += indigo * band * 1.6;
   col *= 1.0 - lanes * 0.65;
-  col *= uStrength;
-  gl_FragColor = vec4(col, 1.0);
+  gl_FragColor = vec4(col * uStrength, 1.0);
+}
+`;
+const NEBULA_VERT = /* glsl */ `
+varying vec3 vDir;
+void main(){
+  vDir = position;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`;
+const NEBULA_DRAW_VERT = /* glsl */ `
+varying vec3 vDir;
+void main(){
+  vDir = position;
+  gl_Position = (projectionMatrix * modelViewMatrix * vec4(position, 1.0)).xyww; // pinned to the far plane
+}
+`;
+const NEBULA_DRAW_FRAG = /* glsl */ `
+varying vec3 vDir;
+uniform samplerCube tCube;
+void main(){
+  gl_FragColor = vec4(textureCube(tCube, vDir).rgb, 1.0);
 }
 `;
 
@@ -108,9 +119,30 @@ void main(){
 }
 `;
 
-export function createSky(shared) {
+/** Render the nebula into a 256² half-float cube map, once. Its detail is low-frequency. */
+function bakeNebula(renderer, strength) {
+  const target = new THREE.WebGLCubeRenderTarget(256, {
+    type: THREE.HalfFloatType,
+    generateMipmaps: false,
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+  });
+  const scene = new THREE.Scene();
+  const geo = new THREE.SphereGeometry(10, 48, 32);
+  const mat = new THREE.ShaderMaterial({ vertexShader: NEBULA_VERT, fragmentShader: NEBULA_BAKE_FRAG, uniforms: { uStrength: { value: strength } }, side: THREE.BackSide, depthTest: false });
+  scene.add(new THREE.Mesh(geo, mat));
+  const cam = new THREE.CubeCamera(0.1, 100, target);
+  const prev = renderer.autoClear;
+  renderer.autoClear = true;
+  cam.update(renderer, scene);
+  renderer.autoClear = prev;
+  geo.dispose();
+  mat.dispose();
+  return target.texture;
+}
+
+export function createSky(shared, renderer) {
   const group = new THREE.Group();
-  group.frustumCulled = false;
 
   // --- stars ---
   const rnd = mulberry32(1337);
@@ -125,28 +157,23 @@ export function createSky(shared) {
     [0.85, 0.9, 1.0],
     [0.7, 0.8, 1.0],
   ];
-  const axis = new THREE.Vector3(0.35, 0.82, -0.45).normalize();
   const v = new THREE.Vector3();
   for (let i = 0; i < N; i++) {
-    // Bias towards a band so the sky has structure.
+    // Bias towards the band so the sky has structure.
     for (;;) {
       v.set(rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1);
       const l = v.length();
       if (l > 1 || l < 0.05) continue;
       v.divideScalar(l);
-      const lat = v.dot(axis);
+      const lat = v.dot(GAL_AXIS);
       if (rnd() < 0.25 + 0.75 * Math.exp(-lat * lat * 7)) break;
     }
-    pos[i * 3] = v.x * 9000;
-    pos[i * 3 + 1] = v.y * 9000;
-    pos[i * 3 + 2] = v.z * 9000;
+    v.multiplyScalar(9000).toArray(pos, i * 3);
     const m = Math.pow(rnd(), 5.5); // most stars are faint
     size[i] = 1.1 + m * 3.6;
     const t = tint[Math.min(3, Math.floor(rnd() * 4))];
     const b = 0.16 + m * 2.2;
-    col[i * 3] = t[0] * b;
-    col[i * 3 + 1] = t[1] * b;
-    col[i * 3 + 2] = t[2] * b;
+    col.set([t[0] * b, t[1] * b, t[2] * b], i * 3);
     phase[i] = rnd();
   }
   const sg = new THREE.BufferGeometry();
@@ -154,32 +181,40 @@ export function createSky(shared) {
   sg.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
   sg.setAttribute('aColor', new THREE.BufferAttribute(col, 3));
   sg.setAttribute('aPhase', new THREE.BufferAttribute(phase, 1));
-  const starMat = new THREE.ShaderMaterial({
-    uniforms: { uPx: shared.uPx, uTime: shared.uTime, uTwinkle: { value: 1 } },
-    vertexShader: STARS_VERT,
-    fragmentShader: STARS_FRAG,
-    // not 'transparent': keeps the stars in the opaque pass so renderOrder puts them first
-    depthWrite: false,
-    depthTest: false,
-    blending: THREE.AdditiveBlending,
-  });
-  const stars = new THREE.Points(sg, starMat);
+  const stars = new THREE.Points(
+    sg,
+    new THREE.ShaderMaterial({
+      uniforms: { uPx: shared.uPx, uTime: shared.uTime },
+      vertexShader: STARS_VERT,
+      fragmentShader: STARS_FRAG,
+      // not 'transparent': keeps the stars in the opaque pass so renderOrder puts them first
+      depthWrite: false,
+      depthTest: false,
+      blending: THREE.AdditiveBlending,
+    }),
+  );
   stars.frustumCulled = false;
   stars.renderOrder = -90;
   group.add(stars);
 
-  // --- nebula dome ---
-  const nebMat = new THREE.ShaderMaterial({
-    uniforms: { uTime: shared.uTime, uOct: shared.uOct, uStrength: { value: 0.1 } },
-    vertexShader: NEBULA_VERT,
-    fragmentShader: NEBULA_FRAG,
-    side: THREE.BackSide,
-    depthWrite: false,
-    depthTest: false,
-  });
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(100, 48, 32), nebMat);
+  // --- nebula dome: sampled from the baked cube map, drawn after the opaque pass so anything in
+  // front of it (planets, the star) rejects those pixels before the fragment shader runs ---
+  const domeGeo = new THREE.SphereGeometry(100, 32, 24);
+  domeGeo.deleteAttribute('normal');
+  domeGeo.deleteAttribute('uv');
+  const dome = new THREE.Mesh(
+    domeGeo,
+    new THREE.ShaderMaterial({
+      uniforms: { tCube: { value: bakeNebula(renderer, 0.1) } },
+      vertexShader: NEBULA_DRAW_VERT,
+      fragmentShader: NEBULA_DRAW_FRAG,
+      side: THREE.BackSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }),
+  );
   dome.frustumCulled = false;
-  dome.renderOrder = -100;
+  dome.renderOrder = 90;
   group.add(dome);
 
   // --- dust ---
@@ -212,14 +247,11 @@ export function createSky(shared) {
   return {
     group,
     dust,
-    starMat,
-    nebMat,
-    dustMat,
     /** Keep the star field centred on the camera; scale the dust box with the scene. */
     follow(camera, dustBox) {
       group.position.copy(camera.position);
       dustMat.uniforms.uCam.value.copy(camera.position);
-      if (dustBox) dustMat.uniforms.uBox.value = dustBox;
+      dustMat.uniforms.uBox.value = dustBox;
     },
   };
 }

@@ -2,7 +2,26 @@
 // varying/gl_FragColor compatibility defines, so these are written in the
 // familiar GLSL 1.00 dialect that compiles unchanged as GLSL ES 3.00.
 
+export const HASH = /* glsl */ `
+vec3 hash33(vec3 p3){
+  p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973));
+  p3 += dot(p3, p3.yxz + 33.33);
+  return fract((p3.xxy + p3.yxx) * p3.zyx);
+}
+float hash13(vec3 p3){
+  p3 = fract(p3 * 0.1031);
+  p3 += dot(p3, p3.zyx + 31.32);
+  return fract((p3.x + p3.y) * p3.z);
+}
+float hash12(vec2 p){
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+`;
+
 export const NOISE = /* glsl */ `
+${HASH}
 vec3 mod289(vec3 x){ return x - floor(x * (1.0 / 289.0)) * 289.0; }
 vec4 mod289(vec4 x){ return x - floor(x * (1.0 / 289.0)) * 289.0; }
 vec4 permute(vec4 x){ return mod289(((x * 34.0) + 10.0) * x); }
@@ -57,17 +76,17 @@ float snoise(vec3 v){
 // the shimmer and blocky derivative-bump artefacts on distant planets.
 float fbm(vec3 p, float octaves){
   float fw = length(fwidth(p));
-  float a = 0.5, s = 0.0, norm = 0.0, f = 1.0;
+  float a = 0.5, s = 0.0, f = 1.0;
   for (int i = 0; i < 8; i++) {
     if (float(i) >= octaves) break;
     float w = 1.0 - smoothstep(0.16, 0.55, fw * f);
+    if (w <= 0.0) break;                       // this and every finer octave is below a pixel
     s += a * w * snoise(p);
-    norm += a;
     p = p * 2.03 + vec3(11.7, 3.1, 7.3);
     f *= 2.03;
     a *= 0.5;
   }
-  return s / norm;
+  return s / (1.0 - exp2(-octaves));           // sum of the full series 0.5 + 0.25 + ...
 }
 
 // Same fractal without the pixel-footprint fade. For coordinates with a branch cut (atan), where
@@ -101,21 +120,6 @@ float ridged(vec3 p, float octaves){
   return s / norm;
 }
 
-vec3 hash33(vec3 p3){
-  p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973));
-  p3 += dot(p3, p3.yxz + 33.33);
-  return fract((p3.xxy + p3.yxx) * p3.zyx);
-}
-float hash13(vec3 p3){
-  p3 = fract(p3 * 0.1031);
-  p3 += dot(p3, p3.zyx + 31.32);
-  return fract((p3.x + p3.y) * p3.z);
-}
-float hash12(vec2 p){
-  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract((p3.x + p3.y) * p3.z);
-}
 `;
 
 // Cellular crater field on the unit sphere. Returns height (bowl < 0, raised rim > 0)
@@ -182,5 +186,22 @@ vec2 raySphere(vec3 ro, vec3 rd, float r){
   if (h < 0.0) return vec2(-1.0);
   h = sqrt(h);
   return vec2(-b - h, -b + h);
+}
+`;
+
+// Every planet is tidally locked, so in its own frame the star is always on +X.
+export const SUN_DIR = /* glsl */ `#define SUN_DIR vec3(1.0, 0.0, 0.0)
+`;
+
+// Vertex shader shared by planets, clouds and the star: unit-sphere position plus the camera in the
+// object's frame (uCamObj is set from the CPU once per object instead of inverting a matrix per vertex).
+export const OBJ_VERT = /* glsl */ `
+varying vec3 vPos;
+varying vec3 vView;
+uniform vec3 uCamObj;
+void main(){
+  vPos = position;
+  vView = uCamObj - position;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `;
