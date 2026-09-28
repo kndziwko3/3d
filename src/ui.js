@@ -61,7 +61,6 @@ export function buildPanels(lang) {
   out.push({
     id: 'star',
     hue: '#ff7a45',
-    glyph: '★',
     html: `
       <p class="kicker"><span>${esc(c.star.kicker)}</span><span class="sep"></span><span class="muted">TRAPPIST-1</span></p>
       <h2>${esc(c.star.name)}</h2>

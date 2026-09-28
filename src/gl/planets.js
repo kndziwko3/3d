@@ -201,7 +201,8 @@ void main(){
   col += uSunColor * sp * (1.0 + s.gloss / 60.0);
 
   // faint fill on the dark side: scattered starlight, neighbouring worlds
-  col += s.albedo * uAmbient * (0.25 + 0.75 * (1.0 - day));
+  float rimK = 1.0 - clamp(dot(N, V), 0.0, 1.0);
+  col += s.albedo * uAmbient * (0.25 + 0.75 * (1.0 - day)) * (0.30 + 0.95 * pow(rimK, 1.6));
   col += s.emit * day;
 
   gl_FragColor = vec4(col, 1.0);

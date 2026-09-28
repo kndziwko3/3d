@@ -164,7 +164,8 @@ async function boot() {
     console.warn('compileAsync', e);
   }
   setProgress(0.8);
-  engine.fx.fade = 0;
+  engine.fx.fade = 0.75;
+  document.body.classList.add('is-ready');
   frame(performance.now());
   setProgress(1);
 

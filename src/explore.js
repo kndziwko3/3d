@@ -296,7 +296,8 @@ export class Explore {
     cam.up.copy(n);
     cam.fov = this.sky.fov;
     cam.lookAt(this._w.copy(cam.position).add(dir));
-    cam.clearViewOffset();
+    if (cam.aspect < 1.05) cam.setViewOffset(eng.cssW, eng.cssH, 0, 0.2 * eng.cssH, eng.cssW, eng.cssH);
+    else cam.clearViewOffset();
     cam.updateProjectionMatrix();
     const sunDir = this._w.copy(cam.position).negate().normalize();
     this.horizon.update(cam, n, sunDir);
@@ -446,6 +447,7 @@ export class Explore {
       return;
     }
 
+    eng.fx.fade = Math.min(1, eng.fx.fade + dt / 0.8); // fades back in after leaving the surface view
     // exaggeration tween (true scale toggle)
     const k = 1 - Math.exp(-dt * 3.4);
     this.exag.p = glerp(this.exag.p, this.exag.tp, k);
@@ -474,9 +476,12 @@ export class Explore {
     cam.lookAt(this.target);
     cam.fov += (38 - cam.fov) * ks;
     // keep the subject clear of the side panel on wide screens
-    const panelShift = cam.aspect > 1.15 ? 0.09 * eng.cssW : 0;
+    const portrait = cam.aspect < 1.05;
+    const panelShift = portrait ? 0 : 0.09 * eng.cssW;
+    const liftTarget = portrait ? 0.2 * eng.cssH : 0; // clear the bottom sheet on phones
     this._shift = (this._shift ?? 0) + (panelShift - (this._shift ?? 0)) * ks;
-    if (this._shift > 0.5) cam.setViewOffset(eng.cssW, eng.cssH, this._shift, 0, eng.cssW, eng.cssH);
+    this._lift = (this._lift ?? 0) + (liftTarget - (this._lift ?? 0)) * ks;
+    if (this._shift > 0.5 || this._lift > 0.5) cam.setViewOffset(eng.cssW, eng.cssH, this._shift, this._lift, eng.cssW, eng.cssH);
     else cam.clearViewOffset();
     cam.updateProjectionMatrix();
 
@@ -599,6 +604,8 @@ export class Explore {
     if (!this.active || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && e.key !== 'Escape') return;
     const k = e.key;
+    // let a focused button or link handle its own Space / Enter
+    if ((k === ' ' || k === 'Enter') && e.target && /^(BUTTON|A)$/.test(e.target.tagName)) return;
     if (k === 'Escape') {
       e.preventDefault();
       if (this.mode === 'sky') this._leaveSky(true);
