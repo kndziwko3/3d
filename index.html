@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TRAPPIST-1 Atlas</title>
+<meta name="description" content="A true-scale 3D atlas of TRAPPIST-1, seven Earth-sized worlds around one small red star. Every planet is procedural, and the soundtrack is the system’s real orbital resonance.">
+<meta name="theme-color" content="#07040a">
+<meta property="og:type" content="website">
+<meta property="og:title" content="TRAPPIST-1 Atlas">
+<meta property="og:description" content="Seven worlds. One small red star. A true-scale 3D atlas, scored by the system’s real orbital resonance.">
+<meta property="og:image" content="./og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2307040a'/%3E%3Ccircle cx='16' cy='16' r='9' fill='%23ff7a45'/%3E%3Ccircle cx='24.5' cy='9' r='2.6' fill='%23f3e7dd'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=IBM+Plex+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+</head>
+<body class="is-loading">
+<canvas id="gl" role="img" aria-label="Interactive 3D view of the TRAPPIST-1 planetary system"></canvas>
+<div id="veil" aria-hidden="true"></div>
+
+<a class="skip" href="#data" data-i18n="ui.skip">Skip to the data</a>
+
+<header id="top">
+  <a class="brand" href="#hero" aria-label="TRAPPIST-1 Atlas"><span class="brand-star" aria-hidden="true"></span><span class="brand-name">TRAPPIST-1</span></a>
+  <div class="controls">
+    <div class="seg" id="lang-seg" role="group" aria-label="Language">
+      <button type="button" data-lang="en" aria-pressed="true">EN</button>
+      <button type="button" data-lang="pl" aria-pressed="false">PL</button>
+    </div>
+    <button type="button" id="btn-sound" class="ctl" aria-pressed="false"><span class="ctl-ico" aria-hidden="true"></span><span class="ctl-txt" data-i18n="ui.sound">Sound</span></button>
+    <button type="button" id="btn-explore" class="ctl ctl-primary"><span class="ctl-txt" data-i18n="ui.explore">Explore</span></button>
+  </div>
+</header>
+
+<nav id="rail" aria-label="Chapters"><ol id="rail-list"></ol></nav>
+<div id="progress" aria-hidden="true"><i></i></div>
+
+<div id="panels"></div>
+<main id="story"></main>
+
+<section id="data" class="doc" aria-labelledby="data-title"></section>
+<footer id="outro" class="doc"></footer>
+
+<aside id="telemetry" aria-live="off">
+  <div class="tele-row"><span class="tele-k" data-i18n="ui.distStar">Distance to star</span><span class="tele-v" id="tele-dist">–</span></div>
+  <div class="tele-row"><span class="tele-k" data-i18n="ui.lightDelay">Starlight takes</span><span class="tele-v" id="tele-delay">–</span></div>
+  <div class="tele-row"><span class="tele-k" data-i18n="ui.sizes">Sizes</span><span class="tele-v" id="tele-scale">–</span></div>
+</aside>
+
+<div id="scale-label" aria-hidden="true"></div>
+<div id="labels" aria-hidden="true"></div>
+<div id="explore-ui" hidden></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<div id="loader" role="dialog" aria-modal="true" aria-labelledby="loader-title">
+  <div class="loader-inner">
+    <div class="loader-star" aria-hidden="true"></div>
+    <h1 id="loader-title">TRAPPIST-1</h1>
+    <p class="loader-sub" id="loader-sub">Seven worlds. One small red star.</p>
+    <div class="loader-bar" aria-hidden="true"><i id="loader-fill"></i></div>
+    <p class="loader-status" id="loader-status" data-i18n="ui.loading">Compiling seven worlds</p>
+    <div class="loader-actions" id="loader-actions" hidden>
+      <button type="button" class="btn btn-primary" id="enter-sound" data-i18n="ui.enterSound">Enter with sound</button>
+      <button type="button" class="btn" id="enter-silent" data-i18n="ui.enterSilent">Enter silently</button>
+    </div>
+    <noscript><p class="loader-status">This atlas needs JavaScript and WebGL2.</p></noscript>
+  </div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
