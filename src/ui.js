@@ -279,10 +279,10 @@ export function renderOutro(mount, lang) {
       <div>
         <h3 class="small">${esc(c.outro.sources)}</h3>
         <ul class="src">
-          <li>${esc(c.outro.s1)} <a href="https://doi.org/10.1038/nature21360" target="_blank" rel="noopener">doi:10.1038/nature21360</a></li>
-          <li>${esc(c.outro.s2)} <a href="https://doi.org/10.3847/PSJ/abd022" target="_blank" rel="noopener">doi:10.3847/PSJ/abd022</a></li>
+          <li>${esc(c.outro.s1)} <a href="https://doi.org/10.1038/nature21360" target="_blank" rel="noopener noreferrer">doi:10.1038/nature21360</a></li>
+          <li>${esc(c.outro.s2)} <a href="https://doi.org/10.3847/PSJ/abd022" target="_blank" rel="noopener noreferrer">doi:10.3847/PSJ/abd022</a></li>
           <li>${esc(c.outro.s3)}</li>
-          <li>${esc(c.outro.s4)} <a href="https://exoplanetarchive.ipac.caltech.edu/overview/TRAPPIST-1" target="_blank" rel="noopener">↗</a></li>
+          <li>${esc(c.outro.s4)} <a href="https://exoplanetarchive.ipac.caltech.edu/overview/TRAPPIST-1" target="_blank" rel="noopener noreferrer">↗</a></li>
         </ul>
         <p class="fine">${esc(c.outro.note)}</p>
       </div>

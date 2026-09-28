@@ -197,6 +197,12 @@ export const COPY = {
       moon: '× the Moon in our sky',
       starSize: 'Star is {n}× the Sun’s width',
       close: 'Close',
+      pause: 'Pause',
+      play: 'Play',
+      moonWord: 'Moon',
+      sunWord: 'Sun',
+      day: 'Day',
+      belowHorizon: 'Every neighbour is below the horizon right now',
     },
     a11y: {
       canvas: 'Interactive 3D view of the TRAPPIST-1 planetary system',
@@ -400,6 +406,12 @@ export const COPY = {
       moon: '× Księżyc na naszym niebie',
       starSize: 'Gwiazda ma {n}× szerokość Słońca',
       close: 'Zamknij',
+      pause: 'Pauza',
+      play: 'Odtwarzaj',
+      moonWord: 'Księżyca',
+      sunWord: 'Słońca',
+      day: 'Doba',
+      belowHorizon: 'Wszyscy sąsiedzi są teraz pod horyzontem',
     },
     a11y: {
       canvas: 'Interaktywny widok 3D układu planetarnego TRAPPIST-1',
@@ -414,7 +426,7 @@ export const LANGS = ['en', 'pl'];
 export function detectLang() {
   try {
     const saved = localStorage.getItem('t1-lang');
-    if (saved && COPY[saved]) return saved;
+    if (LANGS.includes(saved)) return saved;
   } catch {}
   const nav = (navigator.languages && navigator.languages[0]) || navigator.language || 'en';
   return nav.toLowerCase().startsWith('pl') ? 'pl' : 'en';

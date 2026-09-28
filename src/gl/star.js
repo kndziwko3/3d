@@ -161,7 +161,6 @@ export function createStar(shared, radius) {
     group,
     body,
     corona,
-    radius,
     setRadius(r) {
       body.scale.setScalar(r);
       corona.scale.setScalar(r * coronaMat.uniforms.uSize.value);

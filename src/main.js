@@ -19,7 +19,7 @@ const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
 const DEBUG = params.has('debug');
 
-const state = { lang: detectLang(), mode: 'loading', sound: false, started: false };
+const state = { lang: detectLang(), mode: 'loading', sound: false, started: false, static: false };
 const clock = { days: 0, rate: 0.012 };
 const hooks = { explore: null, audio: null };
 
@@ -64,6 +64,7 @@ function renderAll() {
   refs.rail = renderRail(mounts.rail, state.lang);
   renderData(mounts.data, state.lang);
   renderOutro(mounts.outro, state.lang);
+  if (state.static) addStaticNote();
   wireListenLabel();
 }
 
@@ -88,24 +89,28 @@ function telemetryContext() {
 let engine = null;
 let story = null;
 
-function enableStaticMode(reason) {
-  document.body.classList.remove('is-loading');
-  document.body.classList.add('static-mode');
-  const c = COPY[state.lang];
+function addStaticNote() {
   const note = document.createElement('p');
   note.className = 'static-note';
-  note.textContent = reason === 'nogl' ? c.a11y.noWebgl : c.a11y.noWebgl;
+  note.textContent = COPY[state.lang].a11y.noWebgl;
   mounts.panels.prepend(note);
-  refs.panels.forEach((p) => p.style.setProperty('--o', '1'));
-  renderData(mounts.data, state.lang);
+}
+
+/** No WebGL2: the same content as a plain, readable page. CSS does the layout. */
+function enableStaticMode() {
+  state.static = true;
+  document.body.classList.remove('is-loading');
+  document.body.classList.add('static-mode');
+  addStaticNote();
 }
 
 async function boot() {
   refs.spacers = buildSpacers(mounts.spacers);
   renderAll();
+  wireCommon();
 
   if (!hasWebGL2()) {
-    enableStaticMode('nogl');
+    enableStaticMode();
     return;
   }
 
@@ -114,11 +119,11 @@ async function boot() {
   setProgress(0.12);
 
   try {
-    const q = params.get('q');
-    engine = new Engine($('#gl'), { tier: q !== null ? Number(q) : undefined });
+    const q = params.get('q'); // ?q=0|1|2 forces low, medium or high
+    engine = new Engine($('#gl'), { tier: ['0', '1', '2'].includes(q) ? Number(q) : undefined });
   } catch (err) {
     console.warn('WebGL init failed', err);
-    enableStaticMode('nogl');
+    enableStaticMode();
     return;
   }
   engine.resize(innerWidth, innerHeight);
@@ -176,7 +181,7 @@ async function boot() {
   window.__ready = true;
 
   $('#scale-label').textContent = COPY[state.lang].scale.mercury;
-  wireEvents();
+  wireApp();
   requestAnimationFrame(loop);
   if (DEBUG) exposeDebug();
 }
@@ -269,19 +274,9 @@ function enter(withSound) {
   if (idx > 0) setTimeout(() => story.goTo(idx, false), 60);
 }
 
-function wireEvents() {
-  $('#enter-sound').addEventListener('click', () => enter(true));
-  $('#enter-silent').addEventListener('click', () => enter(false));
-
-  addEventListener('resize', () => {
-    engine.resize(innerWidth, innerHeight);
-    story.layout();
-  });
-  document.fonts?.ready?.then(() => story.layout());
-
+/** Behaviour that works with or without WebGL: language switch, in-page links, actions. */
+function wireCommon() {
   document.querySelectorAll('#lang-seg button').forEach((b) => b.addEventListener('click', () => setLang(b.dataset.lang)));
-  $('#btn-sound').addEventListener('click', () => hooks.audio?.toggle?.());
-  $('#btn-explore').addEventListener('click', () => hooks.explore?.toggle?.());
 
   document.addEventListener('click', (e) => {
     const a = e.target.closest('a[href^="#"]');
@@ -306,6 +301,21 @@ function wireEvents() {
   });
 
   document.addEventListener('visibilitychange', () => hooks.audio?.visibility?.(document.hidden));
+}
+
+/** WebGL-only behaviour. */
+function wireApp() {
+  $('#enter-sound').addEventListener('click', () => enter(true));
+  $('#enter-silent').addEventListener('click', () => enter(false));
+
+  addEventListener('resize', () => {
+    engine.resize(innerWidth, innerHeight);
+    story.layout();
+  });
+  document.fonts?.ready?.then(() => story.layout());
+
+  $('#btn-sound').addEventListener('click', () => hooks.audio?.toggle?.());
+  $('#btn-explore').addEventListener('click', () => hooks.explore?.toggle?.());
 }
 
 // -------------------------------------------------------------------------------------

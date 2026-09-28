@@ -281,6 +281,7 @@ export class Story {
     if (pose.shiftX || pose.shiftY) cam.setViewOffset(w, h, -pose.shiftX * w, pose.shiftY * h, w, h);
     else cam.clearViewOffset();
     cam.updateProjectionMatrix();
+    cam.updateMatrixWorld(true);
 
     sys.setExaggeration(pose.exagP, pose.exagS);
     sys.setVisible({ orbits: pose.orbits, markers: pose.markers, mercury: pose.mercury });

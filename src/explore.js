@@ -336,7 +336,7 @@ export class Explore {
       }
     });
     if (best >= 0) this._aimAt(best);
-    else this.toast?.(this.lang === 'pl' ? 'Wszyscy sąsiedzi są teraz pod horyzontem' : 'Every neighbour is below the horizon right now');
+    else this.toast?.(this.c.explore.belowHorizon);
   }
 
   _wideView() {
@@ -385,8 +385,8 @@ export class Explore {
       const d = this._v.copy(pos).sub(camPos);
       const dist = d.length();
       const deg = (2 * Math.atan(p.radius / dist)) / D2R;
-      if (deg > best.deg) best = { deg, id: p.id };
       const above = d.dot(n) / dist > -0.02;
+      if (above && deg > best.deg) best = { deg, id: p.id }; // only worlds you can actually see
       const ndc = this._w.copy(pos).project(cam);
       const vis = above && ndc.z < 1 && Math.abs(ndc.x) < 0.98 && Math.abs(ndc.y) < 0.95;
       el.classList.toggle('edge', false);
@@ -406,7 +406,7 @@ export class Explore {
       if (vis) {
         const px = deg / 2 / (cam.fov / 2) * (h / 2); // apparent radius in px, small-angle
         el.style.transform = `translate(${((ndc.x * 0.5 + 0.5) * w).toFixed(1)}px, ${((-ndc.y * 0.5 + 0.5) * h + Math.max(14, px * 1.2)).toFixed(1)}px)`;
-        if (doText) el.lastElementChild.textContent = `${fmt(deg, 2)}° · ${fmt(deg / MOON_ANGULAR_DEG, 1)}× ${this.lang === 'pl' ? 'Księżyca' : 'Moon'}`;
+        if (doText) el.lastElementChild.textContent = `${fmt(deg, 2)}° · ${fmt(deg / MOON_ANGULAR_DEG, 1)}× ${this.c.explore.moonWord}`;
       }
     });
     // the star
@@ -420,7 +420,7 @@ export class Explore {
     if (sVis) {
       const px = sDeg / 2 / (cam.fov / 2) * (h / 2);
       sEl.style.transform = `translate(${((sNdc.x * 0.5 + 0.5) * w).toFixed(1)}px, ${((-sNdc.y * 0.5 + 0.5) * h + Math.max(16, px * 1.3)).toFixed(1)}px)`;
-      if (doText) sEl.lastElementChild.textContent = `${fmt(sDeg, 2)}° · ${fmt(sDeg / SUN_ANGULAR_DEG, 1)}× ${this.lang === 'pl' ? 'Słońca' : 'Sun'}`;
+      if (doText) sEl.lastElementChild.textContent = `${fmt(sDeg, 2)}° · ${fmt(sDeg / SUN_ANGULAR_DEG, 1)}× ${this.c.explore.sunWord}`;
     }
     if (doText) {
       const big = document.getElementById('sky-big');
@@ -484,6 +484,7 @@ export class Explore {
     if (this._shift > 0.5 || this._lift > 0.5) cam.setViewOffset(eng.cssW, eng.cssH, this._shift, this._lift, eng.cssW, eng.cssH);
     else cam.clearViewOffset();
     cam.updateProjectionMatrix();
+    cam.updateMatrixWorld(true);
 
     eng.fx.exposure = 1;
     eng.fx.bloom = this.exag.p > 5 ? 0.75 : 0.9;
@@ -683,7 +684,7 @@ export class Explore {
         <section class="ex-sec">
           <h3>${esc(x.time)} <b id="ex-day">–</b></h3>
           <div class="ex-row">
-            <button type="button" class="ex-play" id="ex-play" aria-label="${esc(x.paused)}">${ICON_PAUSE}</button>
+            <button type="button" class="ex-play" id="ex-play" aria-label="${esc(x.pause)}">${ICON_PAUSE}</button>
             <input type="range" id="ex-speed" min="${RATE_MIN}" max="${RATE_MAX}" step="0.01" value="${this.rateLog}" aria-label="${esc(x.speed)}">
           </div>
           <div class="ex-kv"><div><span>${esc(x.speed)}</span><b id="ex-rate">–</b></div></div>
@@ -763,7 +764,7 @@ export class Explore {
     const $ = (s) => this.root.querySelector(s);
     const fmt = makeFormatter(this.lang);
     $('#ex-play').innerHTML = this.playing ? ICON_PAUSE : ICON_PLAY;
-    $('#ex-play').setAttribute('aria-label', this.playing ? this.c.explore.paused : this.c.explore.time);
+    $('#ex-play').setAttribute('aria-label', this.playing ? this.c.explore.pause : this.c.explore.play);
     $('#ex-speed').value = String(this.rateLog);
     $('#ex-rate').textContent = this.playing ? `${fmt(this.rate, this.rate < 1 ? 2 : 1)} ${this.c.explore.perSecond}` : this.c.explore.paused;
     this.root.querySelectorAll('[data-opt]').forEach((b) => b.setAttribute('aria-pressed', String(this.opts[b.dataset.opt])));
@@ -803,7 +804,7 @@ export class Explore {
         <div><span>${esc(c.stats.year)}</span><b>${fmt(p.period, 2)} ${esc(c.ui.days)}</b></div>
         <div><span>${esc(c.stats.orbit)}</span><b>${fmt(p.orbitKm / 1e6, 2)} ${esc(c.ui.millionKm)}</b></div>
         <div><span>${esc(c.stats.temp)}</span><b>${fmt(Math.round(p.teq))} K</b></div>
-        <div><span>${esc(c.stats.sky)}</span><b>${fmt(p.starAngularDeg / SUN_ANGULAR_DEG, 1)}× ${this.lang === 'pl' ? 'Słońca' : 'Sun'}</b></div>`;
+        <div><span>${esc(c.stats.sky)}</span><b>${fmt(p.starAngularDeg / SUN_ANGULAR_DEG, 1)}× ${esc(c.explore.sunWord)}</b></div>`;
     }
     this._syncUi();
   }
@@ -813,7 +814,7 @@ export class Explore {
     this._lastTime = now;
     const fmt = makeFormatter(this.lang);
     const d = this.root.querySelector('#ex-day');
-    if (d) d.textContent = `${this.lang === 'pl' ? 'Doba' : 'Day'} ${fmt(this.clock.days, 1)}`;
+    if (d) d.textContent = `${this.c.explore.day} ${fmt(this.clock.days, 1)}`;
   }
 
   // labels ---------------------------------------------------------------

@@ -46,6 +46,8 @@ export class Engine {
     if (coarse || cores <= 4) start = 1;
     if (soft) start = 0;
     this.tierIndex = tier ?? start;
+    // never auto-upgrade past the tier the device class suggests (soft renderers stay at low)
+    this._maxTier = tier ?? (soft ? 0 : 2);
     this.resScale = 1;
     this.cssW = 1;
     this.cssH = 1;
@@ -106,31 +108,44 @@ export class Engine {
     this.resize(this.cssW, this.cssH, true);
   }
 
-  /** Called once per frame with the raw frame time in ms. Adjusts quality when needed. */
+  /**
+   * Called once per frame with the raw frame time in ms. rAF is vsync-locked, so "fast" means
+   * "keeping up with the display's own interval" (learned from the fastest recent frames), not
+   * a fixed millisecond figure. Quality steps up only if an earlier upgrade did not backfire.
+   */
   govern(ms) {
     this.frameMs += (ms - this.frameMs) * 0.08;
+    this._minWin = Math.min(this._minWin ?? Infinity, ms);
     if (this._govCooldown > 0) {
       this._govCooldown--;
       return;
     }
-    this._govFrames++;
-    if (this._govFrames < 40) return;
+    if (++this._govFrames < 40) return;
     this._govFrames = 0;
-    const slow = this.frameMs > 25;
-    const fast = this.frameMs < 13.5;
+    const base = THREE.MathUtils.clamp(this._minWin, 4, 60); // ≈ display refresh interval
+    this._minWin = Infinity;
+    const now = performance.now();
+    const slow = this.frameMs > Math.max(24, base * 1.5);
+    const keepingUp = base < 22 && this.frameMs < base * 1.12 + 1;
     if (slow) {
       this._govCalm = 0;
+      if (now - (this._lastUpgrade ?? -1e9) < 12000) this._noUpgradeUntil = now + 90000; // it backfired
       if (this.resScale > 0.62) this.setResScale(this.resScale - 0.12);
       else if (this.tierIndex > 0) {
         this.setResScale(0.85);
         this.setTier(this.tierIndex - 1);
       }
       this._govCooldown = 50;
-    } else if (fast) {
-      this._govCalm++;
-      if (this._govCalm >= 4) {
+    } else if (keepingUp && now > (this._noUpgradeUntil ?? 0)) {
+      if (++this._govCalm >= 5) {
         this._govCalm = 0;
-        if (this.resScale < 1) this.setResScale(this.resScale + 0.1);
+        if (this.resScale < 1) {
+          this.setResScale(this.resScale + 0.1);
+          this._lastUpgrade = now;
+        } else if (this.tierIndex < TIERS.length - 1 && this.tierIndex < this._maxTier) {
+          this.setTier(this.tierIndex + 1);
+          this._lastUpgrade = now;
+        }
         this._govCooldown = 50;
       }
     } else {
@@ -140,6 +155,7 @@ export class Engine {
 
   render(simDays, seconds, dt, fxOverride) {
     const s = this.system;
+    this.camera.updateMatrixWorld(true); // projections below must use this frame's view matrix
     s.update(simDays, seconds, dt, this.camera, this.cssH);
     const fx = { ...this.fx, ...fxOverride };
     fx.time = seconds;

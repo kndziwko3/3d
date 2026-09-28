@@ -216,7 +216,7 @@ export class System {
     this.shared.uTime.value = seconds;
 
     const camPos = camera.position;
-    let minDist = Math.max(0, camPos.length() - this.star.radius * this.exag.star);
+    let minDist = Math.max(0, camPos.length() - STAR.radius * this.exag.star);
 
     for (let i = 0; i < this.planets.length; i++) {
       const pl = this.planets[i];
@@ -227,7 +227,7 @@ export class System {
       pl.group.position.copy(pl.pos);
       // Tidal lock: local +X faces the star
       pl.spin.rotation.y = Math.PI - th;
-      pl.spin.updateMatrixWorld(true);
+      pl.group.updateMatrixWorld(true); // parent first: the spin matrix must see this frame's position
 
       const hidden = this.hidden === i;
       pl.group.visible = !hidden;

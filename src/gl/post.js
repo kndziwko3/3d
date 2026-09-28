@@ -185,6 +185,7 @@ export class Post {
     this.samples = 4;
     this.mips = [];
     this.sceneRT = null;
+    this._dirty = true;
 
     this.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     const tri = makeFullscreenTriangle();
@@ -256,14 +257,13 @@ export class Post {
   setSize(width, height) {
     this.width = Math.max(2, Math.floor(width));
     this.height = Math.max(2, Math.floor(height));
-    this._build();
+    this._dirty = true; // rebuilt once, lazily, in render()
   }
 
   setQuality({ samples, levels }) {
-    const changed = samples !== this.samples || levels !== this.levels;
+    if (samples !== this.samples || levels !== this.levels) this._dirty = true;
     this.samples = samples;
     this.levels = levels;
-    if (changed) this._build();
   }
 
   _build() {
@@ -311,6 +311,10 @@ export class Post {
 
   /** fx: exposure, bloom, threshold, flare, starUV, aberration, grain, vignette, fade, time */
   render(scene, camera, fx) {
+    if (this._dirty) {
+      this._build();
+      this._dirty = false;
+    }
     const r = this.renderer;
     const prevAuto = r.autoClear;
     r.autoClear = false;
